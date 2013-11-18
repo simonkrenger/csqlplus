@@ -14,7 +14,7 @@ Usage
 The script can be used by either specifying the query to be run on the command line or use an SQL script as input.
 
 The following example shows how to query multiple databases by specifying the query on the command line:
-`./csqlplus.sh  -q "SELECT username,account_status FROM dba_users WHERE account_status like '%LOCKED%';" -i sample/inventory.txt -p "tiger" -v`
+    ./csqlplus.sh  -q "SELECT username,account_status FROM dba_users WHERE account_status like '%LOCKED%';" -i sample/inventory.txt -p "tiger" -v
 
 Here is another example that uses an SQL script as input:
-`./csqlplus.sh  -f sample/query.sql -i sample/inventory.txt -u "simon" -p "tiger" -v`
+    ./csqlplus.sh  -f sample/query.sql -i sample/inventory.txt -u "simon" -p "tiger" -v
