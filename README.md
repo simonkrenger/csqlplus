@@ -20,3 +20,14 @@ The following example shows how to query multiple databases by specifying the qu
 Here is another example that uses an SQL script as input:
 
     ./csqlplus.sh  -f sample/query.sql -i sample/inventory.txt -u "simon" -p "tiger" -v
+
+
+Pitfalls
+--------
+Be careful when querying dynamic performance views such as "v$instance", as BASH will try to replace the "$instance" part. Instead, either escape the dollar sign or use single quotes:
+
+    ./csqlplus.sh -q "SELECT * FROM v\$instance;" -i sample/inventory.txt -p "tiger" -v
+
+or
+
+    ./csqlplus.sh -q 'SELECT * FROM v$instance;' -i sample/inventory.txt -p "tiger" -v
