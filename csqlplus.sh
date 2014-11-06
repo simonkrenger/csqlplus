@@ -3,7 +3,7 @@
 # Cluster SQL*Plus
 # Tool to query multiple databases in one command, useful in large environments
 #
-# Copyright (C) 2013 Simon Krenger <simon@krenger.ch>
+# Copyright (C) 2014 Simon Krenger <simon@krenger.ch>
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,6 +18,7 @@
 QUERY=
 QUERY_FILE=
 VERBOSE=0
+CONCURRENCY=0
 USERNAME=simon
 PASSWORD=
 INVENTORY_FILE=
@@ -26,7 +27,7 @@ usage()
 {
 cat << EOF
 usage: $0 <-q "query"|-f "filename"> <-i "inventory_file"> <-p "password">
-	  [-u "username"] [-v] [-h] [-?]
+	  [-u "username"] [-c] [-v] [-h] [-?]
 
 Tool to query multiple databases in one command, useful in large environments
 
@@ -37,12 +38,13 @@ OPTIONS:
    -i	   Inventory file containing all databases to be queried
    -u	   Username to be used for queries (Defaults to '$USERNAME')
    -p	   Password to be used for queries
+   -c	   Enable concurrency
    -v      Verbose
 EOF
 }
 
 
-while getopts "hq:f:i:u:p:v" OPTION
+while getopts "hq:f:i:u:p:vc" OPTION
 do
      case $OPTION in
          h)
@@ -67,7 +69,10 @@ do
 	 v)
 	     VERBOSE=1
 	     ;;
-         ?)
+	 c)
+	     CONCURRENCY=1
+	     ;;
+	 ?)
              usage
              exit
              ;;
@@ -133,6 +138,7 @@ if [[ -z "$QUERY_FILE" ]]; then
 	# Prepare SQL script
 	echo "set linesize `tput cols`" >> $SQLFILE
 	echo "set pagesize 1000" >> $SQLFILE
+	echo "WHENEVER SQLERROR EXIT" >> $SQLFILE
 	echo "$QUERY" >> $SQLFILE
 	echo "quit" >> $SQLFILE # Append "quit"
 else
@@ -144,8 +150,13 @@ fi
 CLEAN_INVENTORY=$(mktemp) || exit 1
 
 # Before executing queries, tnsping every DB and make a new CLEAN_INVENTORY
+# This CLEAN_INVENTORY only contains entries that passed the tnsping test
+echo "Validating..." 
 while read TNSNAME
 do
+	if [ $VERBOSE -eq 1 ]; then
+		echo "Validating $TNSNAME..."
+	fi
 	tnsping $TNSNAME >/dev/null 2>&1
 	if [ $? -eq 0 ]; then
 		echo $TNSNAME >> $CLEAN_INVENTORY	
@@ -158,16 +169,43 @@ if [ $VERBOSE -eq 1 ]; then
 	echo "Validation complete, now executing queries..."
 fi
 
-## Main loop
-while read TNSNAME
-do
-	if [ $VERBOSE -eq 1 ]; then
-		echo "$USERNAME@$TNSNAME:"
-	fi
-	sqlplus -S $USERNAME/$PASSWORD@$TNSNAME @${SQLFILE}
+## Execution part
 
-done < "$CLEAN_INVENTORY"
+if [ $CONCURRENCY -eq 1 ]; then
+	# Make a temporary output folder to gather all output
+	OUTFOLDER=$(mktemp -d) || exit 1
+
+	# Now, start a process for each entry in CLEAN_INVENTORY
+	while read TNSNAME
+	do
+		# Execute and send to background
+		(sqlplus -S $USERNAME/$PASSWORD@$TNSNAME @${SQLFILE} > $OUTFOLDER/$TNSNAME) &
+		LAST_PID=$!
+		# Add PID of backgrounded process to PROCESS_ARRAY
+		PROCESS_ARRAY=("${PROCESS_ARRAY[@]}" "$LAST_PID")
+
+	done < "$CLEAN_INVENTORY"
+
+	# Now wait for all background processes to finish
+	wait ${PROCESS_ARRAY[@]}
+
+	# Write all output to STDOUT
+	for outfile in $OUTFOLDER/*; do
+		cat "$outfile" | awk -v outfile="$(basename $outfile)" '{print outfile": "$0}'
+		echo ""
+	done
+else
+	# Execute commands serially
+	while read TNSNAME
+	do
+		if [ $VERBOSE -eq 1 ]; then
+                	echo "$USERNAME@$TNSNAME:"
+        	fi
+		sqlplus -S $USERNAME/$PASSWORD@$TNSNAME @${SQLFILE}
+	done < "$CLEAN_INVENTORY"
+fi
 
 # Clean up
 rm $SQLFILE
+rm -rf $OUTFOLDER
 rm $CLEAN_INVENTORY
